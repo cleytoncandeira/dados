@@ -12,6 +12,7 @@ from dados.gold.br_coeficientes_exportacao.preparacao_camada_exportacao import (
 )
 from dados.gold.br_coeficientes_exportacao.utils import (
     COLUNAS_FINAIS,
+    _construir_anos_previsao,
     carregar_parametros_brutos,
     carregar_parametros_exportacao,
     construir_verificacao_matches,
@@ -121,7 +122,9 @@ def test_parametros_gold_sao_compativeis_com_raws_de_apoio() -> None:
             )
 
     anos_taxa = set(taxas_cambio["ano"].astype(int))
-    assert set(parametros["anos_previsao"]).issubset(anos_taxa)
+    assert set(_construir_anos_previsao(parametros["anos_previsao"])).issubset(
+        anos_taxa
+    )
 
 
 def test_auditoria_matches_ncm_gera_verificacao_sintetica(tmp_path) -> None:

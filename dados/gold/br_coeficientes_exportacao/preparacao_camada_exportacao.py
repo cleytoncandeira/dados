@@ -35,7 +35,6 @@ load_dotenv()
 DATASET_ID = "br_coeficientes_exportacao"
 ZONE = "gold"
 TABLE = "preparacao_camada_exportacao"
-LEGACY_TABLE = "preparacao_camada_exportacao_old"
 
 DATABASE_ORIGEM = (
     os.getenv("DATABASE_ORIGEM_EXPORTACAO")
@@ -56,9 +55,6 @@ TABELA_NCM = os.getenv("TABELA_NCM_EXPORTACAO") or os.getenv(
 )
 
 CONFIG_PATH = Path(__file__).with_name("parametros_coeficientes_exportacao.json")
-LEGACY_CONFIG_PATH = Path(__file__).with_name(
-    "parametros_coeficientes_exportacao_old.json"
-)
 RESULTADOS_DIR = Path(__file__).with_name("resultados")
 
 PK_COLS = ["ano", "produto"]
@@ -117,9 +113,8 @@ def _load_params(config_path: Path) -> dict:
     }
 
 
-def extract() -> tuple[pd.DataFrame, dict, dict]:
+def extract() -> tuple[pd.DataFrame, dict]:
     params = _load_params(CONFIG_PATH)
-    legacy_params = _load_params(LEGACY_CONFIG_PATH)
 
     if not DATABASE_ORIGEM:
         raise ValueError(
@@ -143,19 +138,13 @@ def extract() -> tuple[pd.DataFrame, dict, dict]:
         )
         dados_exportacao = db.download_data(consulta)
 
-    return dados_exportacao, params, legacy_params
+    return dados_exportacao, params
 
 
-def transform(payload: tuple[pd.DataFrame, dict, dict]) -> dict[str, pd.DataFrame]:
-    dados_exportacao, params, legacy_params = payload
+def transform(payload: tuple[pd.DataFrame, dict]) -> pd.DataFrame:
+    dados_exportacao, params = payload
     df = preparar_dados_coeficientes_exportacao(dados_exportacao, **params)
-    legacy_df = preparar_dados_coeficientes_exportacao(
-        dados_exportacao, **legacy_params
-    )
-    return {
-        TABLE: df[list(MODEL.model_fields.keys())].copy(),
-        LEGACY_TABLE: legacy_df[list(MODEL.model_fields.keys())].copy(),
-    }
+    return df[list(MODEL.model_fields.keys())].copy()
 
 
 def _validate_one(df: pd.DataFrame, label: str) -> pd.DataFrame:
@@ -179,13 +168,11 @@ def _validate_one(df: pd.DataFrame, label: str) -> pd.DataFrame:
     return df
 
 
-def validate(dfs: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
-    for table in [TABLE, LEGACY_TABLE]:
-        dfs[table] = _validate_one(dfs[table], table)
-    return dfs
+def validate(df: pd.DataFrame) -> pd.DataFrame:
+    return _validate_one(df, TABLE)
 
 
-def load(dfs: dict[str, pd.DataFrame]) -> None:
+def load(df: pd.DataFrame) -> None:
     columns = pydantic_to_postgres_columns(MODEL)
     with PostgresETL(
         host="localhost",
@@ -194,15 +181,14 @@ def load(dfs: dict[str, pd.DataFrame]) -> None:
         password=os.getenv("POSTGRES_PASSWORD"),
         schema=DATASET_ID,
     ) as db:
-        for table, df in dfs.items():
-            db.create_table(table, columns, drop_if_exists=True)
-            db.load_data(table, df, if_exists="append")
+        db.create_table(TABLE, columns, drop_if_exists=True)
+        db.load_data(TABLE, df, if_exists="append")
 
     output_json_path = os.getenv(
         "CAMINHO_SAIDA_JSON_COEFICIENTES_EXPORTACAO"
     ) or os.getenv("EXPORT_COEFFICIENTS_OUTPUT_JSON_PATH")
     if output_json_path:
-        salvar_json_coeficientes_exportacao(dfs[TABLE], Path(output_json_path))
+        salvar_json_coeficientes_exportacao(df, Path(output_json_path))
 
 
 def carregar_coeficientes() -> pd.DataFrame:
@@ -249,16 +235,16 @@ def flow() -> None:
     try:
         payload = extract()
         log.info("extract.done", rows=len(payload[0]))
-        dfs = transform(payload)
-        log.info("transform.done", rows={k: len(v) for k, v in dfs.items()})
-        dfs = validate(dfs)
-        log.info("validate.done", rows={k: len(v) for k, v in dfs.items()})
-        load(dfs)
-        log.info("load.done", rows={k: len(v) for k, v in dfs.items()})
+        df = transform(payload)
+        log.info("transform.done", rows=len(df))
+        df = validate(df)
+        log.info("validate.done", rows=len(df))
+        load(df)
+        log.info("load.done", rows=len(df))
     except Exception as exc:
         log.exception("flow.error", error=str(exc))
         raise
-    log.info("flow.end", rows={k: len(v) for k, v in dfs.items()})
+    log.info("flow.end", rows=len(df))
 
 
 def main() -> None:
