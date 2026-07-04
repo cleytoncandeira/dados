@@ -20,9 +20,7 @@ from dados.gold.pa_coeficientes_custo.models import (
     PaCoeficientesCustoPreparacaoCamadaCusto,
 )
 from dados.gold.pa_coeficientes_custo.utils import (
-    agregar_coeficientes_regional_mais_recente,
     agregar_valores_regionais,
-    calcular_coeficientes_municipais,
     calcular_valores_municipais,
     carregar_parametros_custo,
     clean_region_name,
@@ -42,7 +40,6 @@ DATASET_ID = "pa_coeficientes_custo"
 ZONE = "gold"
 TABLE = "preparacao_camada_custo"
 CONFIG_PATH = Path(__file__).with_name("parametros_coeficientes_custo.json")
-LEGACY_CONFIG_PATH = Path(__file__).with_name("parametros_coeficientes_custo_old.json")
 
 SILVER_SCHEMA = "al_ibge_censoagro"
 SILVER_TABLE_2006 = "tbl_1909_2006"
@@ -83,10 +80,6 @@ def transform(df: pd.DataFrame) -> pd.DataFrame:
     value_to_key_map, rename_map, total_expense_label = carregar_parametros_custo(
         CONFIG_PATH
     )
-    legacy_value_to_key_map, legacy_rename_map, legacy_total_expense_label = (
-        carregar_parametros_custo(LEGACY_CONFIG_PATH)
-    )
-
     valores_agrupados = calcular_valores_municipais(
         df, total_expense_label=total_expense_label
     )
@@ -96,19 +89,7 @@ def transform(df: pd.DataFrame) -> pd.DataFrame:
 
     value_df = expandir_coeficientes(valores_agrupados, value_to_key_map)
     values = agregar_valores_regionais(value_df)
-
-    coeff_agrupados = calcular_coeficientes_municipais(
-        df, total_expense_label=legacy_total_expense_label
-    )
-    coeff_agrupados["nome_regiao_integracao"] = coeff_agrupados[
-        "nome_regiao_integracao"
-    ].replace(legacy_rename_map)
-
-    coeff_df = expandir_coeficientes(coeff_agrupados, legacy_value_to_key_map)
-    coefficients = agregar_coeficientes_regional_mais_recente(coeff_df)
-    final = values.merge(coefficients, on=PK_COLS, how="outer")
-
-    return final[list(MODEL.model_fields.keys())].copy()
+    return values[list(MODEL.model_fields.keys())].copy()
 
 
 def validate(df: pd.DataFrame) -> pd.DataFrame:
@@ -121,10 +102,7 @@ def validate(df: pd.DataFrame) -> pd.DataFrame:
         log.error("validate.error", reason="duplicate_pk", count=int(dupes.sum()))
         raise ValueError(f"Found {int(dupes.sum())} rows duplicating PK {PK_COLS}")
 
-    for column in ["valor", "coeff"]:
-        df[column] = df[column].apply(
-            lambda v: None if pd.isna(v) else Decimal(str(v))
-        )
+    df["valor"] = df["valor"].apply(lambda v: None if pd.isna(v) else Decimal(str(v)))
     [MODEL(**r) for r in df.to_dict("records")]
     return df
 

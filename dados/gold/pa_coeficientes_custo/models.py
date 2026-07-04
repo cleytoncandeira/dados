@@ -21,7 +21,3 @@ class PaCoeficientesCustoPreparacaoCamadaCusto(BaseModel):
         description="Observed cost expense value in thousands of BRL",
         json_schema_extra={"unit": "1000xBRL"},
     )
-    coeff: Decimal | None = Field(
-        description="Legacy cost coefficient (share of total establishment expenses)",
-        json_schema_extra={"unit": "ratio"},
-    )
