@@ -17,7 +17,3 @@ class BrCoeficientesConsumoPreparacaoCamadaConsumo(BaseModel):
         description="Observed consumption expense value converted to thousands of BRL",
         json_schema_extra={"unit": "1000xBRL"},
     )
-    coeff: Decimal | None = Field(
-        description="Legacy consumption coefficient derived from POF expense distribution",
-        json_schema_extra={"unit": "ratio"},
-    )

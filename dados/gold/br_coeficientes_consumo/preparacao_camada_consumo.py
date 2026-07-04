@@ -14,7 +14,6 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from dados.gold.br_coeficientes_consumo.utils import (
-    construir_coeficientes_consumo,
     construir_valores_consumo,
 )
 from dados.gold.br_coeficientes_consumo.models import (
@@ -42,10 +41,6 @@ PARAMETROS_VALORES_CONSUMO = {
     "rotulo_urbano": "Urbana",
     "rotulo_rural": "Rural",
     "padrao_estado": "Estad|Estadual",
-}
-PARAMETROS_COEFICIENTES_CONSUMO = {
-    **PARAMETROS_VALORES_CONSUMO,
-    "variavel_alvo": "Distribuição da despesa monetária e não monetária média mensal familiar",
 }
 PARAMETROS_CONSUMO = PARAMETROS_VALORES_CONSUMO
 
@@ -102,13 +97,9 @@ def extract() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def transform(payload: tuple[pd.DataFrame, pd.DataFrame]) -> pd.DataFrame:
     pof_data, mip_mapping = payload
-    values = construir_valores_consumo(
+    df = construir_valores_consumo(
         pof_data, mip_mapping, PARAMETROS_VALORES_CONSUMO
     )
-    coefficients = construir_coeficientes_consumo(
-        pof_data, mip_mapping, PARAMETROS_COEFICIENTES_CONSUMO
-    )
-    df = values.merge(coefficients, on=PK_COLS, how="outer")
     return df[list(MODEL.model_fields.keys())].copy()
 
 
@@ -122,10 +113,7 @@ def validate(df: pd.DataFrame) -> pd.DataFrame:
         log.error("validate.error", reason="duplicate_pk", count=int(dupes.sum()))
         raise ValueError(f"Found {int(dupes.sum())} rows duplicating PK {PK_COLS}")
 
-    for column in ["valor", "coeff"]:
-        df[column] = df[column].apply(
-            lambda v: None if pd.isna(v) else Decimal(str(v))
-        )
+    df["valor"] = df["valor"].apply(lambda v: None if pd.isna(v) else Decimal(str(v)))
     [MODEL(**r) for r in df.to_dict("records")]
     return df
 
