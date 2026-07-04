@@ -1,15 +1,10 @@
 """Export the gold tables that feed the downstream Layer 2 algorithm.
 
-Reads the gold zone via :class:`PostgresETL` and materialises two complete
-Layer 2 packages under ``gold_export/``:
+Reads the gold zone via :class:`PostgresETL` and materialises the Layer 2
+package under ``gold_export/layer2_new_values/``:
 
-- ``gold_old/`` keeps the previous main-branch contract with ``*_coefficients``
-  artefacts.
-- ``gold_new/`` keeps the updated contract with observed ``*_values``
-  artefacts.
-
-The shared artefacts below are generated in both packages:
-
+- ``cost_values.csv``               (pa_coeficientes_custo.preparacao_camada_custo)
+- ``consumption_values.csv``        (br_coeficientes_consumo.preparacao_camada_consumo)
 - ``investment_coefficients.json``  (br_coeficientes_investimento.coeficientes_investimento)
 - ``export_coefficients.json``      (br_coeficientes_exportacao.preparacao_camada_exportacao)
 - ``income_productivity.json``      (br_coeficientes_renda.renda_produtividade)
@@ -42,20 +37,14 @@ ZONE = "export"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = REPO_ROOT / "gold_export"
-OLD_OUTPUT_DIR = OUTPUT_ROOT / "gold_old"
-NEW_OUTPUT_DIR = OUTPUT_ROOT / "gold_new"
-OUTPUT_DIR = NEW_OUTPUT_DIR
-OLD_ZIP_PATH = OUTPUT_ROOT / "gold_old.zip"
-NEW_ZIP_PATH = OUTPUT_ROOT / "gold_new.zip"
-ZIP_PATH = NEW_ZIP_PATH
+OUTPUT_DIR = OUTPUT_ROOT / "layer2_new_values"
+ZIP_PATH = OUTPUT_ROOT / "layer2_new_values.zip"
 
 log = get_logger(dataset_id=DATASET_ID, zone=ZONE)
 
 GENERATED_FILES = {
     "cost_values.csv",
     "consumption_values.csv",
-    "cost_coefficients.csv",
-    "consumption_coefficients.csv",
     "investment_coefficients.json",
     "export_coefficients.json",
     "income_productivity.json",
@@ -83,45 +72,6 @@ def _read(schema: str, query: str) -> pd.DataFrame:
 def _write_json(path: Path, payload) -> None:
     with path.open("w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2, default=float)
-
-
-def export_cost_coefficients(output_dir: Path | None = None) -> Path:
-    output_dir = OLD_OUTPUT_DIR if output_dir is None else output_dir
-    df = _read(
-        "pa_coeficientes_custo",
-        "SELECT ano, nome_regiao_integracao, tipo_coeff, coeff "
-        "FROM pa_coeficientes_custo.preparacao_camada_custo "
-        "WHERE coeff IS NOT NULL",
-    )
-    out = output_dir / "cost_coefficients.csv"
-    df.to_csv(out, index=False, encoding="utf-8")
-    log.info("export.cost_coefficients", rows=len(df), path=str(out))
-    return out
-
-
-def export_consumption_coefficients(output_dir: Path | None = None) -> Path:
-    output_dir = OLD_OUTPUT_DIR if output_dir is None else output_dir
-    df = _read(
-        "br_coeficientes_consumo",
-        "SELECT ano, coeff_key, coeff "
-        "FROM br_coeficientes_consumo.preparacao_camada_consumo "
-        "WHERE coeff IS NOT NULL",
-    )
-    if df["ano"].nunique() > 1:
-        latest = int(df["ano"].max())
-        log.info("export.consumption_coefficients.pick_year", year=latest)
-        df = df[df["ano"] == latest]
-
-    wide = (
-        df.set_index("coeff_key")["coeff"]
-        .astype(float)
-        .to_frame()
-        .T.reset_index(drop=True)
-    )
-    out = output_dir / "consumption_coefficients.csv"
-    wide.to_csv(out, index=False, encoding="utf-8")
-    log.info("export.consumption_coefficients", cols=len(wide.columns), path=str(out))
-    return out
 
 
 def export_cost_values(output_dir: Path | None = None) -> Path:
@@ -170,29 +120,6 @@ def export_investment_coefficients(output_dir: Path | None = None) -> Path:
 
 
 def export_export_coefficients(output_dir: Path | None = None) -> Path:
-    output_dir = OLD_OUTPUT_DIR if output_dir is None else output_dir
-    df = _read(
-        "br_coeficientes_exportacao",
-        "SELECT ano, produto, coeff "
-        "FROM br_coeficientes_exportacao.preparacao_camada_exportacao_old "
-        "WHERE coeff IS NOT NULL",
-    )
-    payload: dict[str, list[dict]] = {}
-    for ano, grp in df.groupby("ano", sort=True):
-        payload[str(int(ano))] = [
-            {
-                "produto": r["produto"],
-                "coeff": float(r["coeff"]) if r["coeff"] is not None else None,
-            }
-            for _, r in grp.iterrows()
-        ]
-    out = output_dir / "export_coefficients.json"
-    _write_json(out, payload)
-    log.info("export.export_coefficients", years=len(payload), path=str(out))
-    return out
-
-
-def export_export_values(output_dir: Path | None = None) -> Path:
     output_dir = OUTPUT_DIR if output_dir is None else output_dir
     df = _read(
         "br_coeficientes_exportacao",
@@ -215,7 +142,7 @@ def export_export_values(output_dir: Path | None = None) -> Path:
         ]
     out = output_dir / "export_coefficients.json"
     _write_json(out, payload)
-    log.info("export.export_values", years=len(payload), path=str(out))
+    log.info("export.export_coefficients", years=len(payload), path=str(out))
     return out
 
 
@@ -234,59 +161,30 @@ def _yearly_series(table: str) -> dict[str, dict[str, float]]:
 
 
 def export_income_productivity(output_dir: Path | None = None) -> Path:
-    output_dir = OLD_OUTPUT_DIR if output_dir is None else output_dir
-    payload = _yearly_series("renda_produtividade_old")
+    output_dir = OUTPUT_DIR if output_dir is None else output_dir
+    payload = _yearly_series("renda_produtividade")
     out = output_dir / "income_productivity.json"
     _write_json(out, payload)
     log.info("export.income_productivity", years=len(payload), path=str(out))
     return out
 
 
-def export_income_productivity_values(output_dir: Path | None = None) -> Path:
-    output_dir = OUTPUT_DIR if output_dir is None else output_dir
-    payload = _yearly_series("renda_produtividade")
-    out = output_dir / "income_productivity.json"
-    _write_json(out, payload)
-    log.info("export.income_productivity_values", years=len(payload), path=str(out))
-    return out
-
-
 def export_income_salary(output_dir: Path | None = None) -> Path:
-    output_dir = OLD_OUTPUT_DIR if output_dir is None else output_dir
-    payload = _yearly_series("renda_salario_old")
+    output_dir = OUTPUT_DIR if output_dir is None else output_dir
+    payload = _yearly_series("renda_salario")
     out = output_dir / "income_salary.json"
     _write_json(out, payload)
     log.info("export.income_salary", years=len(payload), path=str(out))
     return out
 
 
-def export_income_salary_values(output_dir: Path | None = None) -> Path:
-    output_dir = OUTPUT_DIR if output_dir is None else output_dir
-    payload = _yearly_series("renda_salario")
-    out = output_dir / "income_salary.json"
-    _write_json(out, payload)
-    log.info("export.income_salary_values", years=len(payload), path=str(out))
-    return out
-
-
-SHARED_GENERATORS = (
+GENERATORS = (
+    export_cost_values,
+    export_consumption_values,
     export_investment_coefficients,
-)
-OLD_GENERATORS = (
-    export_cost_coefficients,
-    export_consumption_coefficients,
     export_export_coefficients,
     export_income_productivity,
     export_income_salary,
-    *SHARED_GENERATORS,
-)
-NEW_GENERATORS = (
-    export_cost_values,
-    export_consumption_values,
-    export_export_values,
-    export_income_productivity_values,
-    export_income_salary_values,
-    *SHARED_GENERATORS,
 )
 
 
@@ -335,12 +233,11 @@ def flow() -> None:
     log.info("flow.start", output_root=str(OUTPUT_ROOT))
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     try:
-        _run_package(OLD_OUTPUT_DIR, OLD_ZIP_PATH, OLD_GENERATORS)
-        _run_package(NEW_OUTPUT_DIR, NEW_ZIP_PATH, NEW_GENERATORS)
+        _run_package(OUTPUT_DIR, ZIP_PATH, GENERATORS)
     except Exception as exc:
         log.exception("flow.error", error=str(exc))
         raise
-    log.info("flow.end", old_zip=str(OLD_ZIP_PATH), new_zip=str(NEW_ZIP_PATH))
+    log.info("flow.end", zip=str(ZIP_PATH))
 
 
 if __name__ == "__main__":
